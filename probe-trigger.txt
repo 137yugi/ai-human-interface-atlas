@@ -1,2 +1,2 @@
 Trigger public Atlas browser verification.
-Retry via jsDelivr CDN.
+Retry via rawcdn production CDN.

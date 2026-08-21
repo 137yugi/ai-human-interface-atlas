@@ -1,0 +1,2 @@
+Trigger public Atlas browser verification.
+Retry via Statically CDN.

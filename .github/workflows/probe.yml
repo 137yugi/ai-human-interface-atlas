@@ -22,22 +22,17 @@ jobs:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          URL='https://raw.githack.com/137yugi/ai-human-interface-atlas/main/index.html'
+          URL='https://htmlpreview.github.io/?https://raw.githubusercontent.com/137yugi/ai-human-interface-atlas/main/index.html'
           mkdir -p probe
-          ok=0
-          for attempt in $(seq 1 12); do
-            code=$(curl -L -sS --max-time 30 -o probe/entry.html -w '%{http_code}' "${URL}?v=${GITHUB_RUN_ID}-${attempt}" || true)
-            echo "attempt=$attempt status=$code bytes=$(wc -c < probe/entry.html 2>/dev/null || echo 0)"
-            if [ "$code" = 200 ]; then ok=1; break; fi
-            sleep 5
-          done
-          test "$ok" = 1
+          code=$(curl -L -sS --max-time 30 -o probe/entry.html -w '%{http_code}' "$URL" || true)
+          echo "status=$code bytes=$(wc -c < probe/entry.html 2>/dev/null || echo 0)"
+          test "$code" = 200
           "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
             --window-size=1440,1100 --virtual-time-budget=30000 --dump-dom \
-            "${URL}?v=${GITHUB_RUN_ID}-dom" > probe/dom.html 2>probe/chrome.stderr
+            "$URL" > probe/dom.html 2>probe/chrome.stderr
           "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
             --window-size=1440,1100 --virtual-time-budget=30000 \
-            --screenshot=probe/live.png "${URL}?v=${GITHUB_RUN_ID}-shot"
+            --screenshot=probe/live.png "$URL"
           grep -q 'AI × HUMAN INTERFACE ATLAS 300' probe/dom.html
           grep -q '全300件' probe/dom.html
           grep -q 'Miro' probe/dom.html

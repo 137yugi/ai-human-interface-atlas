@@ -1,4 +1,4 @@
-name: Deploy and probe public Atlas
+name: Probe public Atlas
 
 on:
   pull_request:
@@ -6,47 +6,12 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: atlas-pages-probe
-  cancel-in-progress: true
 
 jobs:
-  deploy-and-probe:
+  probe:
     if: startsWith(github.event.pull_request.title, '[atlas-probe]')
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout production main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Validate production payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -s index.html
-          for f in p00 p01 p02 q00 q01 q02 q03 q04 q05 q06 q07 q08 q09 q10; do test -s "parts/$f.txt"; done
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
-      - name: Upload production site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-
-      - name: Deploy Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
       - name: Install Chrome
         id: chrome
         uses: browser-actions/setup-chrome@v1
@@ -55,13 +20,12 @@ jobs:
         shell: bash
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
-          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           set -euo pipefail
-          URL="${PAGE_URL%/}/"
+          URL='https://raw.githack.com/137yugi/ai-human-interface-atlas/main/index.html'
           mkdir -p probe
           ok=0
-          for attempt in $(seq 1 24); do
+          for attempt in $(seq 1 12); do
             code=$(curl -L -sS --max-time 30 -o probe/entry.html -w '%{http_code}' "${URL}?v=${GITHUB_RUN_ID}-${attempt}" || true)
             echo "attempt=$attempt status=$code bytes=$(wc -c < probe/entry.html 2>/dev/null || echo 0)"
             if [ "$code" = 200 ]; then ok=1; break; fi
@@ -87,18 +51,7 @@ jobs:
           import json, re, os, datetime
           dom=Path('probe/dom.html').read_text(errors='replace')
           png=Path('probe/live.png')
-          result={
-            'verified':True,
-            'url':os.environ['VERIFIED_URL'],
-            'verified_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            'dom_bytes':len(dom.encode()),
-            'screenshot_bytes':png.stat().st_size,
-            'all_300_present':'全300件' in dom,
-            'miro_present':'Miro' in dom,
-            'tldraw_present':'tldraw' in dom,
-            'search_present':'検索' in dom,
-            'tool_card_mentions':len(re.findall('tool-card',dom))
-          }
+          result={'verified':True,'url':os.environ['VERIFIED_URL'],'verified_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'dom_bytes':len(dom.encode()),'screenshot_bytes':png.stat().st_size,'all_300_present':'全300件' in dom,'miro_present':'Miro' in dom,'tldraw_present':'tldraw' in dom,'search_present':'検索' in dom,'tool_card_mentions':len(re.findall('tool-card',dom))}
           Path('probe/result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
           print(json.dumps(result,ensure_ascii=False,indent=2))
           PY

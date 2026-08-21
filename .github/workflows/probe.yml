@@ -22,7 +22,7 @@ jobs:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          URL='https://rawcdn.githack.com/137yugi/ai-human-interface-atlas/0905d0a7269a66fd5e661e84969b1cab851eb4ec/index.html'
+          URL='https://cdn.statically.io/gh/137yugi/ai-human-interface-atlas/0905d0a7269a66fd5e661e84969b1cab851eb4ec/index.html'
           mkdir -p probe
           code=$(curl -L -sS --max-time 30 -o probe/entry.html -w '%{http_code}' "$URL" || true)
           echo "status=$code bytes=$(wc -c < probe/entry.html 2>/dev/null || echo 0)"

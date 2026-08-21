@@ -1,0 +1,121 @@
+name: Deploy and verify Atlas
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate public source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s index.html
+          for f in p00 p01 p02 q00 q01 q02 q03 q04 q05 q06 q07 q08 q09 q10; do test -s "parts/$f.txt"; done
+          if grep -RIE --exclude-dir=.git '(BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|api[_-]?key[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_\-]{20,}|bearer[[:space:]]+[A-Za-z0-9._\-]{20,}|password[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,})' .; then
+            echo 'Potential secret detected' >&2
+            exit 1
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Install Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Verify public site in Chrome
+        shell: bash
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p verification
+          base="${PAGE_URL%/}/"
+          ok=0
+          for attempt in $(seq 1 24); do
+            nonce="${GITHUB_RUN_ID}-${attempt}-$(date +%s)"
+            code=$(curl -L -sS --max-time 30 -o /tmp/entry.html -w '%{http_code}' "${base}?v=${nonce}" || true)
+            echo "attempt=$attempt status=$code bytes=$(wc -c </tmp/entry.html 2>/dev/null || echo 0)"
+            if [ "$code" = '200' ]; then ok=1; break; fi
+            sleep 5
+          done
+          test "$ok" = '1'
+
+          target="${base}?v=${GITHUB_RUN_ID}-browser"
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+            --window-size=1440,1100 --virtual-time-budget=30000 --dump-dom "$target" \
+            > verification/dom.html 2>verification/chrome.stderr
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+            --window-size=1440,1100 --virtual-time-budget=30000 \
+            --screenshot=verification/live.png "$target"
+
+          grep -q 'AI × HUMAN INTERFACE ATLAS 300' verification/dom.html
+          grep -q '全300件' verification/dom.html
+          grep -q 'Miro' verification/dom.html
+          grep -q 'tldraw' verification/dom.html
+          grep -q '検索' verification/dom.html
+          test "$(wc -c < verification/dom.html)" -gt 400000
+          test "$(wc -c < verification/live.png)" -gt 10000
+
+          python - <<'PY'
+          from pathlib import Path
+          import json, os, re, datetime
+          dom=Path('verification/dom.html').read_text(errors='replace')
+          png=Path('verification/live.png')
+          result={
+            'verified': True,
+            'url': os.environ['PAGE_URL'],
+            'verified_at_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'http_rendered': True,
+            'title_present': 'AI × HUMAN INTERFACE ATLAS 300' in dom,
+            'all_300_present': '全300件' in dom,
+            'miro_present': 'Miro' in dom,
+            'tldraw_present': 'tldraw' in dom,
+            'search_present': '検索' in dom,
+            'dom_bytes': len(dom.encode()),
+            'screenshot_bytes': png.stat().st_size,
+            'tool_card_mentions': len(re.findall('tool-card', dom)),
+          }
+          Path('verification/result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2)+'\n')
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-browser-verification-${{ github.run_id }}
+          path: verification/
+          if-no-files-found: warn
+          retention-days: 7

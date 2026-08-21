@@ -1,1 +1,2 @@
 Trigger public Atlas browser verification.
+Retry after Pages deployment workflow update.

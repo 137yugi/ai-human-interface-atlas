@@ -1,0 +1,65 @@
+name: Probe public Atlas
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: startsWith(github.event.pull_request.title, '[atlas-probe]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Probe public URL
+        shell: bash
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          URL='https://137yugi.github.io/ai-human-interface-atlas/'
+          mkdir -p probe
+          ok=0
+          for attempt in $(seq 1 24); do
+            code=$(curl -L -sS --max-time 30 -o probe/entry.html -w '%{http_code}' "${URL}?v=${GITHUB_RUN_ID}-${attempt}" || true)
+            echo "attempt=$attempt status=$code bytes=$(wc -c < probe/entry.html 2>/dev/null || echo 0)"
+            if [ "$code" = 200 ]; then ok=1; break; fi
+            sleep 5
+          done
+          test "$ok" = 1
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+            --window-size=1440,1100 --virtual-time-budget=30000 --dump-dom \
+            "${URL}?v=${GITHUB_RUN_ID}-dom" > probe/dom.html 2>probe/chrome.stderr
+          "$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+            --window-size=1440,1100 --virtual-time-budget=30000 \
+            --screenshot=probe/live.png "${URL}?v=${GITHUB_RUN_ID}-shot"
+          grep -q 'AI × HUMAN INTERFACE ATLAS 300' probe/dom.html
+          grep -q '全300件' probe/dom.html
+          grep -q 'Miro' probe/dom.html
+          grep -q 'tldraw' probe/dom.html
+          grep -q '検索' probe/dom.html
+          test "$(wc -c < probe/dom.html)" -gt 400000
+          test "$(wc -c < probe/live.png)" -gt 10000
+          python - <<'PY'
+          from pathlib import Path
+          import json, re
+          dom=Path('probe/dom.html').read_text(errors='replace')
+          png=Path('probe/live.png')
+          result={'verified':True,'url':'https://137yugi.github.io/ai-human-interface-atlas/','dom_bytes':len(dom.encode()),'screenshot_bytes':png.stat().st_size,'all_300_present':'全300件' in dom,'miro_present':'Miro' in dom,'tldraw_present':'tldraw' in dom,'search_present':'検索' in dom,'tool_card_mentions':len(re.findall('tool-card',dom))}
+          Path('probe/result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          PY
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-public-probe-${{ github.run_id }}
+          path: probe/
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,2 +1,2 @@
 Trigger public Atlas browser verification.
-Retry after raw.githack fallback workflow update.
+Retry via HTMLPreview public renderer.
